@@ -1,11 +1,9 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"id": "task-ranker",
+	"name": "Task Ranker",
+	"version": "0.0.1",
+	"description": "Nothing fancy. We just rank tasks by piority and effort based on a MLP that YOU train based on your energy levels throughout the day.",
+	"author": "Brad Gaddis",
+	"authorUrl": "https://github.com/bradgaddis",
 	"isDesktopOnly": false
 }
