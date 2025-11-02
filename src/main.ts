@@ -1,6 +1,7 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import {getTasks, updateTask, updateTaskList, predict, updateTrainingData, trainModel} from "./logic"
+import {getTasks, updateTask, predict, updateTrainingData, trainModel} from "./logic"
 import {TaskRankerSettings, DEFAULT_SETTINGS} from "./settings"
+import { MLP } from './mlp/mlp';
 
 
 export default class TaskRanker extends Plugin {
@@ -8,6 +9,7 @@ export default class TaskRanker extends Plugin {
 
 	async onload() {
 		
+
 		this.registerMarkdownCodeBlockProcessor("taskranker", (source, el : HTMLElement, ctx) => {
 			el.empty()
 		
@@ -21,9 +23,6 @@ export default class TaskRanker extends Plugin {
 			buttonContainer.style.gap = "8px"; 
 
 			const fullTaskContainer = div.createDiv()
-			updateTaskList();
-
-			this.updateTasks(fullTaskContainer)
 
 			const labels = ["lowest", "falling", "neutral", "raising", "max"];
 
@@ -33,14 +32,14 @@ export default class TaskRanker extends Plugin {
 					new Notice(`${label} clicked!`);
 					await updateTrainingData(label, this)
 					if (this.settings.retrain){
-						await trainModel()
+						await trainModel(this)
 					}
 				});
 			});
+			
 			const updateButton = buttonContainer.createEl("button", { text: "update" });
 				updateButton.addEventListener("click", () => {
 					fullTaskContainer.empty()
-					updateTaskList();
 					this.updateStatus(header)
 					this.updateTasks(fullTaskContainer)
 			});
@@ -63,6 +62,8 @@ export default class TaskRanker extends Plugin {
 	async loadSettings() {
 		// this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 		this.settings = { ...DEFAULT_SETTINGS, ...(await this.loadData()) }
+		this.settings.mlp = new MLP(2, this.settings.hiddenLayerNum, 5, this.settings.learningRate)
+
 
 	}
 
@@ -278,9 +279,22 @@ class TaskRankerSettingTab extends PluginSettingTab {
 			.addText(text => {
 				text
 				.setPlaceholder('/rankeddata.txt')
-				.setValue(this.plugin.settings.jsonSavePath)
+				.setValue(this.plugin.settings.trainingDataSavePath)
 				.onChange(async (value) => {
-            this.plugin.settings.jsonSavePath = value;
+            this.plugin.settings.trainingDataSavePath = value;
+            await this.plugin.saveSettings();
+          })
+			})
+
+		new Setting(containerEl)  
+			.setName('Default save path for model traning data') 
+			
+			.addText(text => {
+				text
+				.setPlaceholder('/rankedmodeldata.txt')
+				.setValue(this.plugin.settings.modelSavePath)
+				.onChange(async (value) => {
+            this.plugin.settings.modelSavePath = value;
             await this.plugin.saveSettings();
           })
 			})

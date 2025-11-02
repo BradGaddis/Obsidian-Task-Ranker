@@ -2,7 +2,6 @@ import { getAPI } from 'obsidian-dataview';
 import {App, Notice } from "obsidian"
 import TaskRanker from './main';
 import { MLP } from "./mlp/mlp"
-let storedTasks : Array<Object> = []
 
 const labels = ["Lowest", "Falling", "Neutral", "Raising", "Max"];
 
@@ -72,13 +71,11 @@ function removeTags(text: string) {
 
 function scheduled(text: string) {
     let match = text.match(/^(\d{1,2})(:\d{2})?( ?- ?(\d{1,2})(:\d{2})?)?/i);
-    // match ? console.log(match) : null
     return match ? match[0] : "";
 }
 
 function isDue(scheduledTag : string, checkNow = null) {
     if (!scheduledTag) return false;
-    console.log(scheduledTag)
     const parseTime = (str: string) => {
         let [hour, minute] = str.split(':');
         hour = parseInt(hour, 10);
@@ -117,6 +114,7 @@ function isDue(scheduledTag : string, checkNow = null) {
 
 export function getTasks(app: TaskRanker) {
     const dv = getAPI();
+    let taskList = []
     
     if (!dv) {
         console.error("Dataview API not available");
@@ -129,7 +127,7 @@ export function getTasks(app: TaskRanker) {
         const tasks = page.file.tasks.where(t => !t.completed);
 
         const todayISO = new Date().toISOString()
-        // console.log(todayISO)
+
         for (const task of tasks) {
             let scheduledDate = task.scheduled ? task.scheduled.toISODate() : null
             let ignore = task.text.includes(" ig") || (task.section.subpath && task.section.subpath.includes(" ig")) || !task.text
@@ -140,6 +138,7 @@ export function getTasks(app: TaskRanker) {
             // if (ignore || task.parent || (scheduledDate && scheduledDate !== todayISO) || (page.file.path.includes("Daily Notes") && page.file.name !== todayISO)) {
             //     continue
             // }
+            
 
             let shortImpact = parseFloat(extractTag(task.text, "si")) || 1
             let longImpact = parseFloat(extractTag(task.text, "li")) || 1
@@ -192,33 +191,33 @@ export function getTasks(app: TaskRanker) {
                 priorityBonus = priority
             }
 
+            const predictionIndex = app.settings.mlp?.predict(getTime())
 
+            //Lowest 
+            if (predictionIndex == 0 && priorityBonus > 0) {
+                
+                // impactWeights[0] = 1
+                // impactWeights[2] *= 2
+                priorityBonus = (1 / energyLevelNum);
 
-            // //Lowest 
-            // if (predictionIndex == 0 && priorityBonus > 0) {
+            // Falling
+            } else if (predictionIndex == 1 && priorityBonus > 0) {
                 
-            //     impactWeights[0] = 1
-            //     // impactWeights[2] *= 2
-            //     priorityBonus = (1 / energyLevelNum);
-
-            // // Falling
-            // } else if (predictionIndex == 1 && priorityBonus > 0) {
+                // impactWeights[3] *= -1
+                priorityBonus = energyLevelNum
                 
-            //     // impactWeights[3] *= -1
-            //     priorityBonus = energyLevelNum
+            // Neutral
+            } 
+            else if (predictionIndex == 3 && priorityBonus > 0) {
+                // impactWeights[1] *= 1
+                // impactWeights[3] = 0
+                priorityBonus = 1 / energyLevelNum;
                 
-            // // Neutral
-            // } 
-            // else if (predictionIndex == 3 && priorityBonus > 0) {
-            //     impactWeights[1] *= 1
-            //     impactWeights[3] = 0
-            //     priorityBonus = 1 / energyLevelNum;
-                
-            // // "Max
-            // } else if (predictionIndex == 4 && priorityBonus > 0) {
-            //     impactWeights[3] *= 2
-            //     priorityBonus *= energyLevelNum;
-            // }
+            // "Max
+            } else if (predictionIndex == 4 && priorityBonus > 0) {
+                // impactWeights[3] *= 2
+                priorityBonus *= energyLevelNum;
+            }
             
             
             
@@ -268,7 +267,7 @@ export function getTasks(app: TaskRanker) {
             }
 
             task["finalWeight"] = finalWeight;
-            storedTasks.push(task)
+            taskList.push(task)
 
             
             // storedTasks.push({
@@ -283,30 +282,30 @@ export function getTasks(app: TaskRanker) {
 
     }
 
-    storedTasks.sort((a, b) => b.finalWeight - a.finalWeight)
-    return storedTasks.slice(0, app.settings.displayLimit)
+    taskList.sort((a, b) => b.finalWeight - a.finalWeight)
+    return taskList.slice(0, app.settings.displayLimit)
 }
 
-export function updateTaskList() {
-    storedTasks = []
-}
 
-export function predict(app: TaskRanker) {
+export function getTime() {
     const now = new Date();
     let currentHour = now.getHours();
     let minutes = now.getMinutes();
 
-    // Round minutes to nearest 15
-    let roundedMinutes = Math.round(minutes / 15) * 15;
+    // // Round minutes to nearest 15
+    // let roundedMinutes = Math.round(minutes / 15) * 15;
 
-    // If rounding minutes reaches 60, increment hour
-    if (roundedMinutes === 60) {
-        roundedMinutes = 0;
-        currentHour = (currentHour + 1) % 24;  // wrap around if 23 -> 0
-    }
+    // // If rounding minutes reaches 60, increment hour
+    // if (roundedMinutes === 60) {
+    //     roundedMinutes = 0;
+    //     currentHour = (currentHour + 1) % 24;  // wrap around if 23 -> 0
+    // }
+    return [currentHour, minutes]
+}
 
-    const mlp = new MLP(2, app.settings.hiddenLayerNum, 5, app.settings.learningRate);
-    const prediction = mlp.predict([currentHour, roundedMinutes])
+export function predict(app: TaskRanker) {
+  
+    const prediction = app.settings.mlp?.predict(getTime())
     return labels[prediction]
     
 }
@@ -321,40 +320,66 @@ let productivityMap = {
  }
 
  
+function getTodayString() : string {
+     const now = new Date()
+     return `${((now.getMonth() + 1) % 12).toString()}-${now.getDate().toString()}-${now.getFullYear().toString()}`
+}
+
 export async function updateTrainingData(label: string, app: TaskRanker) {
+  const currentTime = getTime(); // e.g. [22, 15]
+  console.log(currentTime)
+  const today: string = getTodayString(); // e.g. "1102025"
+  let currentData = await loadTrainingData(app);
 
-    const now = new Date();
-    let currentHour = now.getHours();
-    let minutes = now.getMinutes();
-
-
-    // Round minutes to nearest 15
-    let roundedMinutes = Math.round(minutes / 15) * 15;
-
-    const newData = [{
-        "input": [currentHour, roundedMinutes] , "label" : productivityMap[label]
-    }];
-
-    console.log(newData)
-  const filePath = app.settings.jsonSavePath;
-  const file = app.app.vault.getAbstractFileByPath(filePath);
-
-  let currentData: any[] = [];
-
-  if (file) {
-    try {
-      const content = await app.app.vault.read(file);
-      currentData = JSON.parse(content);
-      if (!Array.isArray(currentData)) currentData = [];
-    } catch (e) {
-      console.error("Failed to parse existing JSON data; starting from empty", e);
-    }
+  // Ensure currentData is an array
+  if (!Array.isArray(currentData)) {
+    currentData = [];
   }
 
-  // Merge existing and new data (simple concatenation)
-  const updatedData = currentData.concat(newData);
-  console.log("saved data ", newData, updatedData)
-  const updatedJson = JSON.stringify(updatedData, null, 2);
+  // Find index of object containing today's date key
+  const todayIndex = currentData.findIndex(obj => Object.prototype.hasOwnProperty.call(obj, today));
+
+  const newEntry = {
+    input: currentTime,
+    label: productivityMap[label]
+  };
+
+  if (todayIndex !== -1) {
+    // Fetch the array of entries for today
+    let entriesArray = currentData[todayIndex][today];
+
+    // Defensive check: if not an array, make it an array containing the existing entry
+    // if (!Array.isArray(entriesArray)) {
+    //   entriesArray = [entriesArray];
+    //   currentData[todayIndex][today] = entriesArray;
+    // }
+
+    // Check if an entry with the same input already exists to avoid duplicates
+    const exists = entriesArray.some(entry =>
+      Array.isArray(entry.input) &&
+      entry.input.length === currentTime.length &&
+      entry.input.every((val, idx) => val === currentTime[idx])
+    );
+
+    if (exists) {
+      new Notice("This information was already found in the data. Avoiding repeats by not saving it again.");
+      return;
+    }
+
+    // Add the new entry to today's array
+    entriesArray.push(newEntry);
+  } else {
+    currentData.push({[today]: []});
+    const todayIndex = currentData.length - 1;
+    
+    currentData[todayIndex][today].push(newEntry)
+  }
+
+  const filePath = app.settings.trainingDataSavePath;
+  const file = app.app.vault.getAbstractFileByPath(filePath);
+
+  // Serialize with pretty printing
+  const updatedJson = JSON.stringify(currentData, null, 2);
 
   if (file) {
     await app.app.vault.modify(file, updatedJson);
@@ -366,14 +391,48 @@ export async function updateTrainingData(label: string, app: TaskRanker) {
 
 
 
-export async function trainModel(){
-    const mlp = new MLP(2, app.settings.hiddenLayerNum, 5, app.settings.learningRate);
-    // Train loop
-    for (let epoch = 0; epoch < 10000; epoch++) {
-      for (const item of trainingData) {
-        mlp.train(item.input, item.label);
+
+export async function trainModel(app: TaskRanker){
+    const data = await loadTrainingData(app)
+    let parsedData = []
+    for(let i in data) {
+        let date = data[i]
+        for (let key in date) {
+            parsedData = parsedData.concat(date[key])
+        }
+    }
+    
+    for (let epoch = 0; epoch < app.settings.trainingEpochs; epoch++) {
+      for (const item of parsedData) {
+        app.settings.mlp?.train(item.input, item.label);
       }
+    }
 
 }
+
+async function loadModel(app: TaskRanker) {
+
 }
 
+async function saveModel(app: TaskRanker) {
+    let data = app.settings.mlp?.save()
+
+}
+
+async function loadTrainingData(app: TaskRanker) {
+    const filePath = app.settings.trainingDataSavePath;
+    const file = app.app.vault.getAbstractFileByPath(filePath);
+
+    let currentData: any[] = [];
+
+    if (file) {
+        try {
+            const content = await app.app.vault.read(file);
+            currentData = JSON.parse(content);
+            if (!Array.isArray(currentData)) currentData = [];
+        } catch (e) {
+            console.error("Failed to parse existing JSON data; starting from empty", e);
+        }
+    }
+    return currentData
+}

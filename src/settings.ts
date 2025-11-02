@@ -1,3 +1,5 @@
+import { MLP } from "./mlp/mlp"
+
 
 export interface TaskRankerSettings {
 	displayLimit: number;
@@ -8,9 +10,12 @@ export interface TaskRankerSettings {
     longTermImpactWeight: number;
     fullImpactWeight: number;
     effortLevelWeight: number;
-    jsonSavePath: string
+    trainingDataSavePath: string
     trainingEpochs: number;
+    modelSavePath: string
+    mlp: null | MLP
 }
+
 
 export const DEFAULT_SETTINGS: TaskRankerSettings = {
     displayLimit: 10,
@@ -21,6 +26,8 @@ export const DEFAULT_SETTINGS: TaskRankerSettings = {
     longTermImpactWeight: .1,
     fullImpactWeight: .07,
     effortLevelWeight: .1,
-    jsonSavePath: "jsondata.txt",
-    trainingEpochs: 1000
+    trainingDataSavePath: "rankeddata.txt",
+    modelSavePath: "rankedmodeldata.txt",
+    trainingEpochs: 1000,
+    mlp: null
 }

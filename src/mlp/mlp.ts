@@ -77,4 +77,29 @@ export class MLP {
     }
     return maxIndex;
   }
+
+  save() {
+    return JSON.stringify({
+      inputSize: this.inputSize,
+      hiddenSize: this.hiddenSize,
+      outputSize: this.outputSize,
+      learningRate: this.learningRate,
+      weightsInputHidden: this.weightsInputHidden,
+      weightsHiddenOutput: this.weightsHiddenOutput,
+      biasHidden: this.biasHidden,
+      biasOutput: this.biasOutput
+    });
+  }
+
+  load(jsonString: string) {
+    const data = JSON.parse(jsonString);
+    this.inputSize = data.inputSize;
+    this.hiddenSize = data.hiddenSize;
+    this.outputSize = data.outputSize;
+    this.learningRate = data.learningRate;
+    this.weightsInputHidden = data.weightsInputHidden;
+    this.weightsHiddenOutput = data.weightsHiddenOutput;
+    this.biasHidden = data.biasHidden;
+    this.biasOutput = data.biasOutput;
+  }
 }
