@@ -1,42 +1,9 @@
 import { getAPI } from 'obsidian-dataview';
-import {App, Notice } from "obsidian"
-import TaskRanker from './main';
-import { MLP } from "./mlp/mlp"
+import { Notice } from "obsidian"
+
 
 const labels = ["Lowest", "Falling", "Neutral", "Raising", "Max"];
 
-// let invertedProductivityMap = 
-
-// export function getTasks() {
-//     const dv = getAPI();
-    
-//     if (!dv) {
-//         console.error("Dataview API not available");
-//         return [];
-//     }
-
-//     const pages = dv.pages('#rankedTasks');
-
-//     for (const page of pages) {
-//         const tasks = page.file.tasks.where(t => !t.completed);
-
-
-//         for (const task of tasks) {
-//             if (!storedTasks.includes(task))
-//             {
-//                 storedTasks.push(task);
-//             }
-//         }
-//     }
-
-//     return storedTasks;
-// }
-
-
-export async function updateTask(task: Object) {
-    // new Notice(`${task.text} was updated`)
-    // updateFileContent(task.path)
-}
 
 async function updateFileContent(path: string) {
     const file = this.app.vault.getAbstractFileByPath(path);
@@ -55,31 +22,43 @@ function extractTag(text: string, tag: string) {
     return match ? match[1] : ""
 }
 
-// function hasAnyTag(text: string) {
-//     return text.includes("si:") || text.includes("li:") || text.includes("el:") || text.includes("rec:")
-// }
-
-function removeTags(text: string) {
+export function removeTags(text: string) {
     text = text.replace(/si:\S+/gi, "")
     .replace(/li:\S+/gi, "")
     .replace(/el:\S+/gi, "")
     .replace(/rec:\S+/gi, "")
-    .replace(/pri:\S+/gi, "")
+    // .replace(/pri:\S+/gi, "")
     // .replace(/sch:/gi, "scheduled: ")
     return text.trim()
 }
 
-function scheduled(text: string) {
+function getPriority(text: string) : number {
+    if (text.includes("🔺")) {
+        return 10
+    }
+    if (text.includes("⏫")) {
+        return 5
+    }
+    if (text.includes("🔽")) {
+     return -1
+    }
+    if (text.includes("⏬")) {
+     return -10
+    }
+    return 1
+}
+
+function scheduledTime(text: string) {
     let match = text.match(/^(\d{1,2})(:\d{2})?( ?- ?(\d{1,2})(:\d{2})?)?/i);
     return match ? match[0] : "";
 }
 
-function isDue(scheduledTag : string, checkNow = null) {
+function isDue(scheduledTag : string, checkNow: string = "") {
     if (!scheduledTag) return false;
     const parseTime = (str: string) => {
-        let [hour, minute] = str.split(':');
-        hour = parseInt(hour, 10);
-        minute = minute ? parseInt(minute, 10) : 0;
+        let [sHour, sMinute] = str.split(':');
+        const hour = parseInt(sHour, 10);
+        const minute = sMinute ? parseInt(sMinute, 10) : 0;
         return { hour, minute };
     };
     
@@ -126,18 +105,24 @@ export function getTasks(app: TaskRanker) {
     for (const page of pages) {
         const tasks = page.file.tasks.where(t => !t.completed);
 
-        const todayISO = new Date().toISOString()
+        const today = new Date().toISOString().split("T")[0]
+
+
 
         for (const task of tasks) {
             let scheduledDate = task.scheduled ? task.scheduled.toISODate() : null
             let ignore = task.text.includes(" ig") || (task.section.subpath && task.section.subpath.includes(" ig")) || !task.text
 
-            if (ignore) {
+            if (ignore || task.parent ) {
                 continue
             }
-            // if (ignore || task.parent || (scheduledDate && scheduledDate !== todayISO) || (page.file.path.includes("Daily Notes") && page.file.name !== todayISO)) {
-            //     continue
-            // }
+
+
+            // if
+            // console.log(todayISO, task.scheduled)
+            if (ignore || task.parent || (scheduledDate && scheduledDate > today)) {
+                continue
+            }
             
 
             let shortImpact = parseFloat(extractTag(task.text, "si")) || 1
@@ -145,7 +130,7 @@ export function getTasks(app: TaskRanker) {
             let energyLevel = extractTag(task.text, "el") || "!"
             let wipedEnergy = false
 
-            let scheduledTag = scheduled(task.text)
+            let scheduledTag = scheduledTime(task.text)
             let priority = parseFloat(extractTag(task.text, "pri")) || 1
             
             for (let child of task.children) {
@@ -164,7 +149,7 @@ export function getTasks(app: TaskRanker) {
                     wipedEnergy = true
                 }
                 
-                let childscheduledTag = scheduled(child.text)
+                let childscheduledTag = scheduledTime(child.text)
                 childscheduledTag = isDue(childscheduledTag, scheduledTag)
                 if (childscheduledTag && childscheduledTag != scheduledTag)
                 {
@@ -175,7 +160,7 @@ export function getTasks(app: TaskRanker) {
                 energyLevel += extractTag(child.text, "el") || "!"
                 shortImpact += parseFloat(extractTag(child.text, "si")) || 1
                 longImpact += parseFloat(extractTag(child.text, "li")) || 1
-                priority += parseFloat(extractTag(child.text, "pri")) || 1
+                priority += getPriority(task.text)
 
             }
 
@@ -191,32 +176,24 @@ export function getTasks(app: TaskRanker) {
                 priorityBonus = priority
             }
 
-            const predictionIndex = app.settings.mlp?.predict(getTime())
-
-            //Lowest 
-            if (predictionIndex == 0 && priorityBonus > 0) {
-                
-                // impactWeights[0] = 1
-                // impactWeights[2] *= 2
-                priorityBonus = (1 / energyLevelNum);
-
-            // Falling
-            } else if (predictionIndex == 1 && priorityBonus > 0) {
-                
-                // impactWeights[3] *= -1
-                priorityBonus = energyLevelNum
-                
-            // Neutral
-            } 
-            else if (predictionIndex == 3 && priorityBonus > 0) {
-                // impactWeights[1] *= 1
-                // impactWeights[3] = 0
-                priorityBonus = 1 / energyLevelNum;
-                
-            // "Max
-            } else if (predictionIndex == 4 && priorityBonus > 0) {
-                // impactWeights[3] *= 2
-                priorityBonus *= energyLevelNum;
+            const predictionIndex = app.settings.mlp?.predict(getTime());
+            if (priorityBonus > 0) {
+                switch (predictionIndex) {
+                    case 0: // Low energy 
+                        priorityBonus = (1 / energyLevelNum);
+                        break;
+                    case 1: // Falling energy 
+                        priorityBonus = energyLevelNum * 0.5; 
+                        break;
+                    case 3: // Raising energy 
+                        priorityBonus = energyLevelNum * 0.75; // Adjust 0.75 as needed
+                        break;
+                    case 4: // Max energy
+                        priorityBonus *= energyLevelNum;
+                        break;
+                    default:
+                        break;
+                }
             }
             
             
@@ -227,57 +204,25 @@ export function getTasks(app: TaskRanker) {
             fullImpact * app.settings.fullImpactWeight +
             energyLevelNum * app.settings.effortLevelWeight;
             
-            // "Raising"
-            
-            // if (predictionIndex == 2 && priorityBonus > 0) {
-            //     // priorityBonus = 1.5 * energyLevelNum;
-            //     priorityBonus = 1 / (energyLevelNum * baseWeight);
                 
-            // }
-                
-                
-            // if (scheduledTag) {
-            //     if (isDue(scheduledTag) || (scheduledDate && scheduledDate > todayISO)) {
-            //         baseWeight = Infinity 
-            //     }
-            //     else {
-            //         priorityBonus = 0
+            if (scheduledTag) {
+                if (isDue(scheduledTag) || (scheduledDate && scheduledDate > today)) {
+                    baseWeight = Infinity 
+                }
+                else {
+                    priorityBonus = 0
 
-            //     }
-            // }
+                }
+            }
                 
             let finalWeight = baseWeight * priorityBonus;
 
 
-
-
-            let text = []
-            for (let child of task.children) {
-                let scheduledDate = child.scheduled ? child.scheduled.toISODate() : null
-
-                if (child.checked) {
-                    continue
-                }
-
-                // if (scheduledDate && scheduledDate !== todayISO) {
-                //     continue
-                // }
-
-                text.push("\n\t- " + child.text)
-            }
-
             task["finalWeight"] = finalWeight;
+            task["baseImpact"] = baseWeight;
+            task["priority"] = priority;
+            task["priorityBonus"] = priorityBonus;
             taskList.push(task)
-
-            
-            // storedTasks.push({
-            //     taskLink: removeTags(task.text) + text + "\n" + task.link,
-            //     shortImpact,
-            //     longImpact,
-            //     fullImpact,
-            //     energyLevel,
-            //     finalWeight,
-            // })
         }
 
     }
@@ -436,3 +381,22 @@ async function loadTrainingData(app: TaskRanker) {
     }
     return currentData
 }
+
+
+
+export async function saveTask( app: TaskRanker, task: Object, newTask?: boolean) {
+    const file = app.app.vault.getAbstractFileByPath(task.path)
+    if (!file) return
+
+        const fileText = await this.app.vault.read(file)
+        const lines = fileText.split('\n')
+
+        let thisLine = lines[task.line] ?? ''
+        let newText = await app.getTasksAPI().executeToggleTaskDoneCommand(thisLine, task.path)
+        console.log(newText)
+        lines[task.line] = newText 
+        // lines.splice(task.line, 0, newText)
+
+      await this.app.vault.modify(file, lines.join('\n'))
+    // }
+  }

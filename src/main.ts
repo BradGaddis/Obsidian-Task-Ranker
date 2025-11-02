@@ -1,28 +1,51 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import {getTasks, updateTask, predict, updateTrainingData, trainModel} from "./logic"
+import {getTasks, saveTask, predict, updateTrainingData, trainModel, removeTags} from "./logic"
 import {TaskRankerSettings, DEFAULT_SETTINGS} from "./settings"
 import { MLP } from './mlp/mlp';
 
 
 export default class TaskRanker extends Plugin {
 	settings: TaskRankerSettings;
+	div : HTMLElement
+	header : HTMLElement
+	fullTaskContainer : HTMLElement
 
 	async onload() {
-		
+		this.registerEvent(
+			this.app.metadataCache.on(
+			// @ts-ignore
+			'dataview:metadata-change',
+			(...args: any[]) => {
+				switch (args[0]) {
+				case 'update':
+					this.updateAll()
+					// fullTaskContainer.empty()
+					// this.updateStatus(header)
+					// this.updateTasks(fullTaskContainer)
+					break
+				case 'rename':
+					// this.forgetTasks(args[2])
+					// this.loadTasks(args[1].path, getters.get('showingPastDates'))
+					// break
+				}
+			}
+			)
+		)
 
 		this.registerMarkdownCodeBlockProcessor("taskranker", (source, el : HTMLElement, ctx) => {
 			el.empty()
 		
-			const div = el.createDiv();
-			const header = div.createDiv()
-			header.createEl("h1", { text: `Ranked Tasks | Your current energy level appears to be: ${predict(this)}`});
+			this.div = el.createDiv();
+			this.header = this.div.createDiv()
 
-			this.updateStatus(header)
+			this.header.createEl("h1", { text: `Ranked Tasks | Your current energy level appears to be: ${predict(this)}`});
+
+			this.updateStatus(this.header)
 			const buttonContainer = el.createDiv();
 			buttonContainer.style.display = "flex";
 			buttonContainer.style.gap = "8px"; 
 
-			const fullTaskContainer = div.createDiv()
+			this.fullTaskContainer = this.div.createDiv()
 
 			const labels = ["lowest", "falling", "neutral", "raising", "max"];
 
@@ -34,14 +57,13 @@ export default class TaskRanker extends Plugin {
 					if (this.settings.retrain){
 						await trainModel(this)
 					}
+					this.updateAll()
 				});
 			});
-			
-			const updateButton = buttonContainer.createEl("button", { text: "update" });
+
+			const updateButton = buttonContainer.createEl("button", { text: "Refresh List / Update" });
 				updateButton.addEventListener("click", () => {
-					fullTaskContainer.empty()
-					this.updateStatus(header)
-					this.updateTasks(fullTaskContainer)
+					this.updateAll()
 			});
 
 		});
@@ -71,40 +93,81 @@ export default class TaskRanker extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	updateStatus(headerdiv: HTMLElement){
-		// headerdiv.textContent = `Ranked Tasks | Your current energy level appears to be: ${predict(this)}`
-		headerdiv.empty()
-		headerdiv.createEl("h1", { text: `Ranked Tasks | Your current energy level appears to be: ${predict(this)}`});
+	updateAll() {
+		this.fullTaskContainer.empty()
+		this.updateStatus()
+		this.updateTasks()
+	}
+
+	updateStatus(){
+		this.header.empty()
+		this.header.createEl("h1", { text: `Ranked Tasks | Your current energy level appears to be: ${predict(this)}`});
 
 	}
 
-	updateTasks(div: HTMLElement) {
+	updateTasks() {
 		const tasks = getTasks(this);
 		for (let task of tasks) {
-			const taskDivContainer = div.createDiv();
+			const taskDivContainer = this.fullTaskContainer.createEl("table");
 			taskDivContainer.style.gap = "8px";
 
-			const checkbox = taskDivContainer.createEl("input");
-			checkbox.type = "checkbox";
-
-			// Define an async function to update the task
-			async function updateTaskChecked(isChecked: boolean) {
-				await updateTask(task);
-			}
-
-			// Add the event listener as a normal function (not async)
-			checkbox.addEventListener("change", (event) => {
-				const isChecked = (event.target as HTMLInputElement).checked;
-				updateTaskChecked(isChecked).catch(err => {
-					console.error("Failed to update task", err);
-					new Notice("Failed to update task");
-				});
-			});
-
-			taskDivContainer.appendText(` ${task.text} | ${task.finalWeight}`);
-			// div.appendChild(taskDivContainer)
+			
+			this.formatContainer(task, taskDivContainer)
 		}
 	}
+
+	getTasksAPI() {
+		return this.app.plugins.plugins['obsidian-tasks-plugin'].apiV1;
+
+	}
+
+	formatContainer(task: object, container: HTMLElement): any {
+		const regex = /\[([^\]]+)\]\(([^)]+)\)/;
+		const match = task.text.match(regex);
+		container.style.padding = "10px"
+		const checkbox = container.createEl("input");
+		checkbox.type = "checkbox";
+
+		checkbox.addEventListener("change", async (event) => {
+			await saveTask(this, task, false)
+			// const isChecked = (event.target as HTMLInputElement).checked;
+		});
+		let taskcontainer;
+		if (match) {
+			taskcontainer = container.createEl("a", {text: removeTags(match[1]), href: match[2]})
+		} else {
+			taskcontainer = container.createEl("span", {text: removeTags(task.text)})
+		}
+		
+		taskcontainer.appendText(` | `)
+
+		const button : HTMLElement = container.createEl("button", {text: "Jump to Task"})
+		button.addEventListener("click", () => this.jumpToTask(task))
+		container.style.alignItems = "center"
+		
+		for (let subtask of task.subtasks) {
+			if (subtask.completed) {
+				continue
+			}
+			let subcontainer = container.createDiv()
+			this.formatContainer(subtask, subcontainer)
+		}
+	}
+
+	async jumpToTask(task) {
+		// Open the file in the active pane or new pane
+		const leaf = this.app.workspace.getLeaf(false);
+		await leaf.openFile(this.app.vault.getFileByPath(task.path));
+		// Get the Markdown editor view of the opened file
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (view) {
+			console.log(task)
+			const editor = view.editor;
+			// editor.scrollIntoView({ from: { task.position.start.line, ch: task.position.start.col }, to: { line, ch: col } });
+			editor.setCursor({ line: task.position.start.line, ch: task.position.start.col});
+		}
+	}
+	
 }
 
 class SampleModal extends Modal {
@@ -300,3 +363,5 @@ class TaskRankerSettingTab extends PluginSettingTab {
 			})
 	}
 }
+
+
